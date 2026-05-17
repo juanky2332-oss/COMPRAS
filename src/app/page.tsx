@@ -5,7 +5,7 @@ import { useDropzone } from 'react-dropzone';
 import {
   Upload, Camera, FileText, Search, CheckCircle, XCircle,
   AlertCircle, Building2, Package, ChevronDown, ChevronUp,
-  Type, Image as ImageIcon, Info,
+  Type, Image as ImageIcon, Info, Tag,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -21,6 +21,7 @@ interface Supplier {
   name: string;
   frequency: number;
   relevantItems: string[];
+  matchReason: string;
 }
 
 interface SearchResult {
@@ -30,6 +31,7 @@ interface SearchResult {
     unit?: string;
     reference?: string;
     notes?: string;
+    materialType?: string;
   };
   sapMatches: SapMatch[];
   suppliers: Supplier[];
@@ -76,6 +78,9 @@ function ResultCard({ result, index }: { result: SearchResult; index: number }) 
               {result.item.reference && (
                 <span className="text-xs text-gray-500">Ref: {result.item.reference}</span>
               )}
+              {result.item.materialType && (
+                <span className="text-xs text-indigo-600 font-medium bg-indigo-50 px-1.5 py-0.5 rounded">{result.item.materialType}</span>
+              )}
               {result.sapMatches.length > 0 && (
                 <span className="text-xs font-medium text-blue-600">{result.sapMatches.length} cód. SAP</span>
               )}
@@ -101,7 +106,6 @@ function ResultCard({ result, index }: { result: SearchResult; index: number }) 
             <p className="text-xs text-gray-500 mt-3 italic">{result.item.notes}</p>
           )}
 
-          {/* Approximate match warning */}
           {result.searchNote && (
             <div className="flex items-start gap-2 p-3 bg-amber-50 rounded-lg border border-amber-200 mt-3">
               <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
@@ -109,7 +113,6 @@ function ResultCard({ result, index }: { result: SearchResult; index: number }) 
             </div>
           )}
 
-          {/* Not found message */}
           {!result.found && result.message && (
             <div className="mt-3 p-3 bg-orange-50 rounded-lg border border-orange-200">
               <p className="text-sm text-orange-700">{result.message}</p>
@@ -156,7 +159,14 @@ function ResultCard({ result, index }: { result: SearchResult; index: number }) 
                         {supplier.code}
                       </span>
                     </div>
-                    <p className="text-xs text-gray-500 mt-0.5">{supplier.frequency} pedidos en histórico</p>
+                    {/* Why this supplier */}
+                    {supplier.matchReason && (
+                      <div className="flex items-center gap-1 mt-1">
+                        <Tag className="w-3 h-3 text-purple-400 shrink-0" />
+                        <span className="text-xs text-purple-600 italic">{supplier.matchReason}</span>
+                      </div>
+                    )}
+                    <p className="text-xs text-gray-400 mt-0.5">{supplier.frequency} pedidos en histórico</p>
                     {supplier.relevantItems.length > 0 && (
                       <div className="mt-1.5 flex flex-wrap gap-1">
                         {supplier.relevantItems.slice(0, 3).map((item, j) => (
@@ -172,7 +182,6 @@ function ResultCard({ result, index }: { result: SearchResult; index: number }) 
             </div>
           )}
 
-          {/* Extra note when found but no supplier */}
           {result.found && result.message && (
             <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
               <p className="text-xs text-gray-500">{result.message}</p>
@@ -294,7 +303,6 @@ export default function Home() {
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Input Panel */}
           <div className="space-y-4">
             {/* Mode tabs */}
             <div className="bg-white rounded-xl border border-gray-200 p-1 flex gap-1">
@@ -320,7 +328,6 @@ export default function Home() {
               </button>
             </div>
 
-            {/* Image drop zone */}
             {mode === 'image' && !file && (
               <div
                 {...getRootProps()}
@@ -349,7 +356,6 @@ export default function Home() {
               </div>
             )}
 
-            {/* Image preview */}
             {mode === 'image' && file && (
               <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
                 {preview ? (
@@ -363,7 +369,6 @@ export default function Home() {
               </div>
             )}
 
-            {/* Text input */}
             {mode === 'text' && (
               <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
                 <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200">
@@ -378,7 +383,6 @@ export default function Home() {
               </div>
             )}
 
-            {/* Buttons */}
             <div className="flex gap-3">
               <button
                 onClick={handleAnalyze}
@@ -404,7 +408,6 @@ export default function Home() {
               )}
             </div>
 
-            {/* Info cards */}
             <div className="grid grid-cols-3 gap-2">
               <div className="bg-white rounded-xl p-3 border border-gray-200 text-center">
                 <div className="w-7 h-7 bg-green-100 rounded-lg flex items-center justify-center mx-auto mb-1.5">
