@@ -2,7 +2,11 @@
 
 import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { Upload, Camera, FileText, Search, CheckCircle, XCircle, AlertCircle, Building2, Package, ChevronDown, ChevronUp } from 'lucide-react';
+import {
+  Upload, Camera, FileText, Search, CheckCircle, XCircle,
+  AlertCircle, Building2, Package, ChevronDown, ChevronUp,
+  Type, Image as ImageIcon,
+} from 'lucide-react';
 import clsx from 'clsx';
 
 interface SapMatch {
@@ -161,8 +165,10 @@ function ResultCard({ result, index }: { result: SearchResult; index: number }) 
 }
 
 export default function Home() {
+  const [mode, setMode] = useState<'image' | 'text'>('image');
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  const [textInput, setTextInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState<AnalysisResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -192,15 +198,22 @@ export default function Home() {
     maxSize: 20 * 1024 * 1024,
   });
 
+  const canAnalyze = mode === 'image' ? !!file : textInput.trim().length > 5;
+
   const handleAnalyze = async () => {
-    if (!file) return;
+    if (!canAnalyze) return;
     setLoading(true);
     setError(null);
     setResponse(null);
 
     try {
       const formData = new FormData();
-      formData.append('file', file);
+      if (mode === 'image' && file) {
+        formData.append('file', file);
+      } else {
+        formData.append('text', textInput.trim());
+      }
+
       const res = await fetch('/api/analyze', { method: 'POST', body: formData });
       const data: AnalysisResponse = await res.json();
       if (!res.ok) throw new Error(data.error || 'Error del servidor');
@@ -215,6 +228,7 @@ export default function Home() {
   const handleReset = () => {
     setFile(null);
     setPreview(null);
+    setTextInput('');
     setResponse(null);
     setError(null);
   };
@@ -244,89 +258,141 @@ export default function Home() {
       </header>
 
       <main className="max-w-5xl mx-auto px-4 py-8">
-        {/* Hero */}
         {!response && !loading && (
           <div className="text-center mb-8">
             <h2 className="text-3xl font-bold text-gray-900 mb-3">
               Identifica materiales al instante
             </h2>
             <p className="text-gray-600 max-w-2xl mx-auto">
-              Sube una foto, captura de pantalla o PDF con los materiales que necesitas.
-              Te devolvemos los <strong>códigos SAP</strong> y los <strong>proveedores</strong> que pueden suministrarlo.
+              Sube una foto, captura, PDF o escribe el texto con los materiales que necesitas.
+              Te devolvemos los <strong>códigos SAP</strong> y los <strong>proveedores</strong> recomendados.
             </p>
           </div>
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Upload Panel */}
+          {/* Input Panel */}
           <div className="space-y-4">
-            {!file ? (
-              <div
-                {...getRootProps()}
+
+            {/* Mode tabs */}
+            <div className="bg-white rounded-xl border border-gray-200 p-1 flex gap-1">
+              <button
+                onClick={() => { setMode('image'); handleReset(); }}
                 className={clsx(
-                  'border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-all duration-200',
-                  isDragActive
-                    ? 'border-blue-400 bg-blue-50'
-                    : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50/50 bg-white'
+                  'flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all',
+                  mode === 'image'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
                 )}
               >
-                <input {...getInputProps()} />
-                <div className="flex flex-col items-center gap-4">
-                  <div className="w-16 h-16 bg-blue-100 rounded-2xl flex items-center justify-center">
-                    <Upload className="w-8 h-8 text-blue-600" />
-                  </div>
-                  <div>
-                    <p className="text-lg font-semibold text-gray-700">
-                      {isDragActive ? 'Suelta aquí el archivo' : 'Arrastra o haz clic para subir'}
-                    </p>
-                    <p className="text-sm text-gray-500 mt-1">
-                      Fotos, capturas de pantalla o PDF · Máx. 20MB
-                    </p>
-                  </div>
-                  <div className="flex gap-3 text-xs text-gray-400">
-                    <span className="flex items-center gap-1"><Camera className="w-3 h-3" /> Foto</span>
-                    <span className="flex items-center gap-1"><FileText className="w-3 h-3" /> PDF</span>
-                    <span className="flex items-center gap-1"><Upload className="w-3 h-3" /> Captura</span>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
-                {preview ? (
-                  <img src={preview} alt="Preview" className="w-full max-h-80 object-contain bg-gray-50" />
-                ) : (
-                  <div className="h-40 bg-gray-50 flex items-center justify-center">
-                    <FileText className="w-12 h-12 text-gray-400" />
-                    <span className="ml-3 text-gray-600">{file.name}</span>
-                  </div>
+                <ImageIcon className="w-4 h-4" />
+                Imagen / Recorte
+              </button>
+              <button
+                onClick={() => { setMode('text'); handleReset(); }}
+                className={clsx(
+                  'flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all',
+                  mode === 'text'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
                 )}
-                <div className="p-4 flex gap-3">
-                  <button
-                    onClick={handleAnalyze}
-                    disabled={loading}
-                    className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-semibold py-3 px-4 rounded-xl transition-colors flex items-center justify-center gap-2"
-                  >
-                    {loading ? (
-                      <>
-                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                        Analizando...
-                      </>
-                    ) : (
-                      <>
-                        <Search className="w-4 h-4" />
-                        Buscar materiales
-                      </>
-                    )}
-                  </button>
-                  <button
-                    onClick={handleReset}
-                    className="px-4 py-3 rounded-xl border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors"
-                  >
-                    Limpiar
-                  </button>
+              >
+                <Type className="w-4 h-4" />
+                Pegar texto
+              </button>
+            </div>
+
+            {/* Image mode */}
+            {mode === 'image' && (
+              !file ? (
+                <div
+                  {...getRootProps()}
+                  className={clsx(
+                    'border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-all duration-200',
+                    isDragActive
+                      ? 'border-blue-400 bg-blue-50'
+                      : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50/50 bg-white'
+                  )}
+                >
+                  <input {...getInputProps()} />
+                  <div className="flex flex-col items-center gap-4">
+                    <div className="w-16 h-16 bg-blue-100 rounded-2xl flex items-center justify-center">
+                      <Upload className="w-8 h-8 text-blue-600" />
+                    </div>
+                    <div>
+                      <p className="text-lg font-semibold text-gray-700">
+                        {isDragActive ? 'Suelta aquí el archivo' : 'Arrastra o haz clic para subir'}
+                      </p>
+                      <p className="text-sm text-gray-500 mt-1">
+                        Fotos, capturas de pantalla o PDF · Máx. 20MB
+                      </p>
+                    </div>
+                    <div className="flex gap-3 text-xs text-gray-400">
+                      <span className="flex items-center gap-1"><Camera className="w-3 h-3" /> Foto</span>
+                      <span className="flex items-center gap-1"><FileText className="w-3 h-3" /> PDF</span>
+                      <span className="flex items-center gap-1"><Upload className="w-3 h-3" /> Captura</span>
+                    </div>
+                  </div>
                 </div>
+              ) : (
+                <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
+                  {preview ? (
+                    <img src={preview} alt="Preview" className="w-full max-h-80 object-contain bg-gray-50" />
+                  ) : (
+                    <div className="h-40 bg-gray-50 flex items-center justify-center gap-3">
+                      <FileText className="w-12 h-12 text-gray-400" />
+                      <span className="text-gray-600">{file.name}</span>
+                    </div>
+                  )}
+                </div>
+              )
+            )}
+
+            {/* Text mode */}
+            {mode === 'text' && (
+              <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
+                <div className="p-3 bg-gray-50 border-b border-gray-200">
+                  <p className="text-xs text-gray-500">
+                    Pega aquí un email, presupuesto, lista de materiales o cualquier texto con los artículos que necesitas
+                  </p>
+                </div>
+                <textarea
+                  value={textInput}
+                  onChange={e => setTextInput(e.target.value)}
+                  placeholder="Ejemplo:&#10;- 2 ud. Rodamiento SKF 6205-2RS&#10;- Correa dentada 14M-2240 x 40mm&#10;- Filtro aire compresor Atlas Copco GA37"
+                  className="w-full h-52 p-4 text-sm text-gray-800 resize-none focus:outline-none placeholder-gray-400"
+                />
               </div>
             )}
+
+            {/* Analyze / Clear buttons */}
+            <div className="flex gap-3">
+              <button
+                onClick={handleAnalyze}
+                disabled={loading || !canAnalyze}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed text-white font-semibold py-3 px-4 rounded-xl transition-colors flex items-center justify-center gap-2"
+              >
+                {loading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Analizando...
+                  </>
+                ) : (
+                  <>
+                    <Search className="w-4 h-4" />
+                    {mode === 'text' ? 'Buscar materiales' : 'Analizar imagen'}
+                  </>
+                )}
+              </button>
+              {(file || textInput) && (
+                <button
+                  onClick={handleReset}
+                  className="px-4 py-3 rounded-xl border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors"
+                >
+                  Limpiar
+                </button>
+              )}
+            </div>
 
             {/* Info cards */}
             <div className="grid grid-cols-2 gap-3">
@@ -335,7 +401,7 @@ export default function Home() {
                   <Package className="w-4 h-4 text-blue-600" />
                 </div>
                 <p className="text-sm font-semibold text-gray-800">Códigos SAP</p>
-                <p className="text-xs text-gray-500 mt-0.5">Búsqueda en tu base de datos de artículos</p>
+                <p className="text-xs text-gray-500 mt-0.5">Solo códigos reales, sin genéricos</p>
               </div>
               <div className="bg-white rounded-xl p-4 border border-gray-200">
                 <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center mb-2">
@@ -352,8 +418,10 @@ export default function Home() {
             {loading && (
               <div className="bg-white rounded-2xl border border-gray-200 p-8 text-center">
                 <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-                <p className="font-semibold text-gray-700">Analizando imagen...</p>
-                <p className="text-sm text-gray-500 mt-1">GPT-4 Vision está identificando los artículos</p>
+                <p className="font-semibold text-gray-700">
+                  {mode === 'text' ? 'Procesando texto...' : 'Analizando imagen...'}
+                </p>
+                <p className="text-sm text-gray-500 mt-1">GPT-4 está identificando los artículos</p>
               </div>
             )}
 
@@ -415,7 +483,7 @@ export default function Home() {
       <footer className="mt-16 border-t border-gray-200 bg-white">
         <div className="max-w-5xl mx-auto px-4 py-6 flex items-center justify-between text-xs text-gray-400">
           <span>Vidal Golosinas · Molina de Segura</span>
-          <span>COMPRAS AI — Powered by GPT-4 Vision</span>
+          <span>COMPRAS AI — Powered by GPT-4</span>
         </div>
       </footer>
     </div>
