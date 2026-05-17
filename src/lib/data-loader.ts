@@ -49,12 +49,7 @@ export function normalizeText(text: string): string {
     .trim();
 }
 
-/**
- * Extracts all meaningful tokens from a text string.
- * Handles: full chunks, sub-parts split by separators, pure number sequences.
- * e.g. "6205-2RS/C3" → ["6205-2rs/c3", "6205", "2rs", "c3"]
- */
-function extractTokens(text: string): string[] {
+export function extractTokens(text: string): string[] {
   const tokens = new Set<string>();
   const normalized = normalizeText(text);
   const chunks = normalized.split(/[\s,;:()\[\]{}"']+/).filter(Boolean);
@@ -63,13 +58,11 @@ function extractTokens(text: string): string[] {
     if (!chunk || chunk.length < 2) continue;
     tokens.add(chunk);
 
-    // Sub-split on dashes, dots, slashes, x (dimensions like 40x20), *
     const parts = chunk.split(/[-_.\/x×*]+/);
     for (const part of parts) {
       if (part.length >= 2 && part !== chunk) tokens.add(part);
     }
 
-    // Extract all numeric runs (part numbers, dimensions)
     const nums = chunk.match(/\d+/g) || [];
     for (const n of nums) {
       if (n.length >= 2) tokens.add(n);
@@ -91,14 +84,11 @@ function scoreRecord(queryTokens: string[], desc: string): number {
   let exactMatches = 0;
   const totalMeaningful = queryNumbers.length + queryWords.length;
 
-  // --- Numbers (part numbers, dimensions) ---
   for (const num of queryNumbers) {
     if (normalizedDesc.includes(num)) {
-      // Exact number found in description
       score += num.length >= 5 ? 14 : num.length >= 4 ? 10 : 7;
       exactMatches++;
     } else {
-      // Partial: "6205" matches "62052", or desc has "620" when query is "6205"
       for (const dt of descTokens) {
         if (/^\d+$/.test(dt) && dt.length >= 2) {
           if (dt.startsWith(num) || num.startsWith(dt)) score += 3;
@@ -107,13 +97,11 @@ function scoreRecord(queryTokens: string[], desc: string): number {
     }
   }
 
-  // --- Words (category, brand, spec keywords) ---
   for (const word of queryWords) {
     if (normalizedDesc.includes(word)) {
       score += word.length >= 7 ? 6 : word.length >= 5 ? 4 : 2;
       exactMatches++;
     } else {
-      // Partial word: "rodami" inside "rodamiento", or vice versa
       for (const dt of descTokens) {
         if (dt.length >= 4 && word.length >= 4) {
           if (dt.includes(word) || word.includes(dt)) score += 1;
@@ -122,12 +110,10 @@ function scoreRecord(queryTokens: string[], desc: string): number {
     }
   }
 
-  // Bonus: reward high match ratio (most query tokens matched)
   if (totalMeaningful > 0 && exactMatches > 0) {
     score += (exactMatches / totalMeaningful) * 10;
   }
 
-  // Exact full description match
   if (normalizedDesc === normalizeText(queryTokens.join(' '))) score += 25;
 
   return score;
@@ -198,10 +184,6 @@ export function getSuppliers(): Map<string, SupplierSummary> {
   return cachedSuppliers || new Map();
 }
 
-/**
- * Full-text scored search. Returns up to `limit` unique (sapCode+supplier) records
- * sorted by relevance score. Only includes records with score >= 2.
- */
 export function searchByDescription(query: string, limit = 40): ScoredRecord[] {
   const records = loadData();
   const queryTokens = extractTokens(normalizeText(query)).filter(t => t.length >= 2);
@@ -215,7 +197,6 @@ export function searchByDescription(query: string, limit = 40): ScoredRecord[] {
 
   scored.sort((a, b) => b.score - a.score);
 
-  // Deduplicate by sapCode+supplier
   const seen = new Set<string>();
   const results: ScoredRecord[] = [];
   for (const sr of scored) {
@@ -228,6 +209,34 @@ export function searchByDescription(query: string, limit = 40): ScoredRecord[] {
   }
 
   return results;
+}
+
+/**
+ * Broad single-keyword search: returns all records whose description contains `keyword`.
+ * Used for category-based supplier discovery ("rodamiento", "electrico", "hidraulica"…).
+ * No score threshold — if the word is there, the supplier might have that type of material.
+ */
+export function searchByKeyword(keyword: string, limit = 60): PurchaseRecord[] {
+  const records = loadData();
+  const norm = normalizeText(keyword);
+  if (norm.length < 3) return [];
+
+  const matches: PurchaseRecord[] = [];
+  const seen = new Set<string>();
+
+  for (const record of records) {
+    if (!record.description || !record.supplierCode) continue;
+    if (normalizeText(record.description).includes(norm)) {
+      const key = `${record.sapCode}||${record.supplierCode}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        matches.push(record);
+        if (matches.length >= limit) break;
+      }
+    }
+  }
+
+  return matches;
 }
 
 export function searchBySAPCode(code: string): PurchaseRecord[] {
