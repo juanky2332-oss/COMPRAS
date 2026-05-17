@@ -1,8 +1,10 @@
 import OpenAI from 'openai';
 
-export const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+let _openai: OpenAI | null = null;
+function getOpenAI(): OpenAI {
+  if (!_openai) _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  return _openai;
+}
 
 export interface ExtractedItem {
   description: string;
@@ -54,7 +56,7 @@ export async function extractItemsFromImage(
   base64Image: string,
   mimeType: string
 ): Promise<ExtractedItem[]> {
-  const response = await openai.chat.completions.create({
+  const response = await getOpenAI().chat.completions.create({
     model: 'gpt-4o',
     max_tokens: 2000,
     messages: [
@@ -82,7 +84,7 @@ export async function extractItemsFromImage(
 }
 
 export async function extractItemsFromText(text: string): Promise<ExtractedItem[]> {
-  const response = await openai.chat.completions.create({
+  const response = await getOpenAI().chat.completions.create({
     model: 'gpt-4o',
     max_tokens: 2000,
     messages: [
