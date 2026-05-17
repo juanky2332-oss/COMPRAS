@@ -23,6 +23,31 @@ export interface SearchResult {
   message?: string;
 }
 
+// Codes ending in 4+ zeros, majority-zero codes, or "repuesto generico" descriptions
+function isGenericSapCode(code: string, description: string): boolean {
+  if (!code) return false;
+
+  const descLower = description.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  if (
+    descLower.includes('generico') ||
+    descLower.includes('generic') ||
+    descLower.includes('repuesto gen') ||
+    descLower.includes('articulo gen')
+  ) return true;
+
+  // Ends in 4 or more consecutive zeros
+  if (/0{4,}$/.test(code)) return true;
+
+  // Code like 000000000599000000 — more than 60% zeros in a long code
+  const digitsOnly = code.replace(/\D/g, '');
+  if (digitsOnly.length >= 8) {
+    const zeroCount = (digitsOnly.match(/0/g) || []).length;
+    if (zeroCount / digitsOnly.length >= 0.6) return true;
+  }
+
+  return false;
+}
+
 export function findMatches(item: {
   description: string;
   quantity?: string;
@@ -37,7 +62,6 @@ export function findMatches(item: {
     found: false,
   };
 
-  // Search by reference/SAP code if provided
   if (item.reference) {
     const byCode = searchBySAPCode(item.reference);
     if (byCode.length > 0) {
@@ -46,7 +70,6 @@ export function findMatches(item: {
     }
   }
 
-  // Search by description
   const searchQuery = [item.description, item.notes].filter(Boolean).join(' ');
   if (searchQuery) {
     const byDesc = searchByDescription(searchQuery, 8);
@@ -60,7 +83,8 @@ export function findMatches(item: {
   results.found = results.sapMatches.length > 0 || results.suppliers.length > 0;
 
   if (!results.found) {
-    results.message = 'No se ha encontrado este artículo en la base de datos. Se recomienda consultar directamente con proveedores de la zona de Molina de Segura.';
+    results.message =
+      'No se ha encontrado este artículo en la base de datos. Se recomienda consultar directamente con proveedores de la zona de Molina de Segura.';
   }
 
   return results;
@@ -74,11 +98,9 @@ function addSapMatches(
   const seen = new Set(results.sapMatches.map(m => m.sapCode));
   for (const r of records) {
     if (!r.sapCode || seen.has(r.sapCode)) continue;
-    results.sapMatches.push({
-      sapCode: r.sapCode,
-      description: r.description,
-      confidence,
-    });
+    // Skip generic/placeholder codes
+    if (isGenericSapCode(r.sapCode, r.description)) continue;
+    results.sapMatches.push({ sapCode: r.sapCode, description: r.description, confidence });
     seen.add(r.sapCode);
   }
 }
@@ -88,11 +110,10 @@ function addSuppliers(results: SearchResult, records: PurchaseRecord[]) {
   const supplierCodes = new Set(records.map(r => r.supplierCode).filter(Boolean));
   const seen = new Set(results.suppliers.map(s => s.code));
 
-  for (const code of supplierCodes) {
+  for (const code of Array.from(supplierCodes)) {
     if (seen.has(code)) continue;
     const supplier = allSuppliers.get(code);
     if (!supplier) continue;
-
     results.suppliers.push({
       code: supplier.code,
       name: supplier.name,
