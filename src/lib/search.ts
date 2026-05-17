@@ -1,4 +1,10 @@
-import { searchByDescription, searchBySAPCode, getSuppliers, type PurchaseRecord } from './data-loader';
+import {
+  searchByDescription,
+  searchBySAPCode,
+  getSuppliers,
+  type PurchaseRecord,
+  type ScoredRecord,
+} from './data-loader';
 
 export interface SearchResult {
   item: {
@@ -12,6 +18,7 @@ export interface SearchResult {
     sapCode: string;
     description: string;
     confidence: 'high' | 'medium' | 'low';
+    confidenceLabel: string;
   }[];
   suppliers: {
     code: string;
@@ -20,32 +27,29 @@ export interface SearchResult {
     relevantItems: string[];
   }[];
   found: boolean;
+  searchNote?: string;
   message?: string;
 }
 
-// Codes ending in 4+ zeros, majority-zero codes, or "repuesto generico" descriptions
+// Score thresholds → confidence levels
+const SCORE_HIGH = 20;
+const SCORE_MEDIUM = 9;
+const SCORE_POSSIBLE = 2;
+
 function isGenericSapCode(code: string, description: string): boolean {
   if (!code) return false;
-
-  const descLower = description.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-  if (
-    descLower.includes('generico') ||
-    descLower.includes('generic') ||
-    descLower.includes('repuesto gen') ||
-    descLower.includes('articulo gen')
-  ) return true;
-
-  // Ends in 4 or more consecutive zeros
+  const d = (description || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  if (d.includes('generico') || d.includes('generic') || d.includes('repuesto gen') || d.includes('articulo gen')) return true;
   if (/0{4,}$/.test(code)) return true;
-
-  // Code like 000000000599000000 — more than 60% zeros in a long code
-  const digitsOnly = code.replace(/\D/g, '');
-  if (digitsOnly.length >= 8) {
-    const zeroCount = (digitsOnly.match(/0/g) || []).length;
-    if (zeroCount / digitsOnly.length >= 0.6) return true;
-  }
-
+  const digits = code.replace(/\D/g, '');
+  if (digits.length >= 8 && (digits.match(/0/g) || []).length / digits.length >= 0.6) return true;
   return false;
+}
+
+function toConfidence(score: number): { confidence: 'high' | 'medium' | 'low'; label: string } {
+  if (score >= SCORE_HIGH) return { confidence: 'high', label: 'Coincidencia alta' };
+  if (score >= SCORE_MEDIUM) return { confidence: 'medium', label: 'Coincidencia probable' };
+  return { confidence: 'low', label: 'Posible — verificar' };
 }
 
 export function findMatches(item: {
@@ -55,74 +59,88 @@ export function findMatches(item: {
   reference?: string;
   notes?: string;
 }): SearchResult {
-  const results: SearchResult = {
-    item,
-    sapMatches: [],
-    suppliers: [],
-    found: false,
-  };
+  const result: SearchResult = { item, sapMatches: [], suppliers: [], found: false };
 
+  // 1. Direct lookup by SAP/reference code
   if (item.reference) {
     const byCode = searchBySAPCode(item.reference);
     if (byCode.length > 0) {
-      addSapMatches(results, byCode, 'high');
-      addSuppliers(results, byCode);
+      for (const r of byCode) {
+        if (isGenericSapCode(r.sapCode, r.description)) continue;
+        if (!result.sapMatches.find(m => m.sapCode === r.sapCode)) {
+          result.sapMatches.push({ sapCode: r.sapCode, description: r.description, confidence: 'high', confidenceLabel: 'Código exacto' });
+        }
+      }
+      collectSuppliers(result, byCode);
     }
   }
 
-  const searchQuery = [item.description, item.notes].filter(Boolean).join(' ');
-  if (searchQuery) {
-    const byDesc = searchByDescription(searchQuery, 8);
-    if (byDesc.length > 0) {
-      const confidence = results.sapMatches.length > 0 ? 'medium' : 'high';
-      addSapMatches(results, byDesc, confidence);
-      addSuppliers(results, byDesc);
+  // 2. Scored fuzzy search by description + notes
+  const query = [item.description, item.notes].filter(Boolean).join(' ');
+  if (query) {
+    const scored = searchByDescription(query, 40);
+
+    // SAP codes: only medium+ confidence in main list
+    const mediumPlus = scored.filter(sr => sr.score >= SCORE_MEDIUM && sr.record.sapCode);
+    for (const sr of mediumPlus.slice(0, 6)) {
+      if (isGenericSapCode(sr.record.sapCode, sr.record.description)) continue;
+      if (!result.sapMatches.find(m => m.sapCode === sr.record.sapCode)) {
+        const { confidence, label } = toConfidence(sr.score);
+        result.sapMatches.push({ sapCode: sr.record.sapCode, description: sr.record.description, confidence, confidenceLabel: label });
+      }
+    }
+
+    // Suppliers: collect from ALL scored records (even low score means possible supplier)
+    collectSuppliers(result, scored.map(sr => sr.record));
+
+    // Fallback SAP: if still no codes, show best low-score matches with a warning
+    if (result.sapMatches.length === 0) {
+      const lowMatches = scored.filter(sr => sr.score >= SCORE_POSSIBLE && sr.record.sapCode);
+      for (const sr of lowMatches.slice(0, 3)) {
+        if (isGenericSapCode(sr.record.sapCode, sr.record.description)) continue;
+        if (!result.sapMatches.find(m => m.sapCode === sr.record.sapCode)) {
+          result.sapMatches.push({ sapCode: sr.record.sapCode, description: sr.record.description, confidence: 'low', confidenceLabel: 'Posible — verificar' });
+        }
+      }
+      if (result.sapMatches.length > 0) {
+        result.searchNote = 'No se encontró coincidencia exacta. Los códigos mostrados son aproximados. Comprueba que el artículo coincide antes de usarlos.';
+      }
     }
   }
 
-  results.found = results.sapMatches.length > 0 || results.suppliers.length > 0;
+  result.found = result.sapMatches.length > 0 || result.suppliers.length > 0;
 
-  if (!results.found) {
-    results.message =
-      'No se ha encontrado este artículo en la base de datos. Se recomienda consultar directamente con proveedores de la zona de Molina de Segura.';
+  if (!result.found) {
+    result.message = 'Artículo no encontrado en el histórico. No lo hemos pedido antes o tiene una descripción muy distinta. Prueba con palabras clave diferentes o consulta a los proveedores industriales de la zona.';
   }
 
-  return results;
+  return result;
 }
 
-function addSapMatches(
-  results: SearchResult,
-  records: PurchaseRecord[],
-  confidence: 'high' | 'medium' | 'low'
-) {
-  const seen = new Set(results.sapMatches.map(m => m.sapCode));
-  for (const r of records) {
-    if (!r.sapCode || seen.has(r.sapCode)) continue;
-    // Skip generic/placeholder codes
-    if (isGenericSapCode(r.sapCode, r.description)) continue;
-    results.sapMatches.push({ sapCode: r.sapCode, description: r.description, confidence });
-    seen.add(r.sapCode);
-  }
-}
-
-function addSuppliers(results: SearchResult, records: PurchaseRecord[]) {
+function collectSuppliers(result: SearchResult, records: PurchaseRecord[]) {
   const allSuppliers = getSuppliers();
-  const supplierCodes = new Set(records.map(r => r.supplierCode).filter(Boolean));
-  const seen = new Set(results.suppliers.map(s => s.code));
+  const seen = new Set(result.suppliers.map(s => s.code));
 
-  for (const code of Array.from(supplierCodes)) {
+  // Rank suppliers by how many times they appear in the matched records
+  const hits = new Map<string, number>();
+  for (const r of records) {
+    if (!r.supplierCode) continue;
+    hits.set(r.supplierCode, (hits.get(r.supplierCode) || 0) + 1);
+  }
+
+  const ranked = Array.from(hits.entries()).sort((a, b) => b[1] - a[1]);
+
+  for (const [code] of ranked) {
     if (seen.has(code)) continue;
     const supplier = allSuppliers.get(code);
     if (!supplier) continue;
-    results.suppliers.push({
+    result.suppliers.push({
       code: supplier.code,
       name: supplier.name,
       frequency: supplier.frequency,
-      relevantItems: supplier.items.slice(0, 5),
+      relevantItems: supplier.items.slice(0, 4),
     });
     seen.add(code);
+    if (result.suppliers.length >= 6) break;
   }
-
-  results.suppliers.sort((a, b) => b.frequency - a.frequency);
-  results.suppliers = results.suppliers.slice(0, 5);
 }
