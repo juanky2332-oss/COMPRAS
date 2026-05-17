@@ -11,6 +11,11 @@ export interface PurchaseRecord {
   purchaseDoc: string;
 }
 
+export interface ScoredRecord {
+  record: PurchaseRecord;
+  score: number;
+}
+
 export interface SupplierSummary {
   code: string;
   name: string;
@@ -26,18 +31,106 @@ function parseSupplier(raw: string): { code: string; name: string } {
   if (!raw) return { code: '', name: '' };
   const trimmed = String(raw).trim();
   const match = trimmed.match(/^(\d+)\s+(.+)$/);
-  if (match) {
-    return { code: match[1].trim(), name: match[2].trim() };
-  }
+  if (match) return { code: match[1].trim(), name: match[2].trim() };
   return { code: '', name: trimmed };
 }
 
-function normalizeText(text: string): string {
+export function normalizeText(text: string): string {
   return String(text || '')
     .toLowerCase()
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
+    .replace(/[áàäâ]/g, 'a')
+    .replace(/[éèëê]/g, 'e')
+    .replace(/[íìïî]/g, 'i')
+    .replace(/[óòöô]/g, 'o')
+    .replace(/[úùüû]/g, 'u')
+    .replace(/ñ/g, 'n')
     .trim();
+}
+
+/**
+ * Extracts all meaningful tokens from a text string.
+ * Handles: full chunks, sub-parts split by separators, pure number sequences.
+ * e.g. "6205-2RS/C3" → ["6205-2rs/c3", "6205", "2rs", "c3"]
+ */
+function extractTokens(text: string): string[] {
+  const tokens = new Set<string>();
+  const normalized = normalizeText(text);
+  const chunks = normalized.split(/[\s,;:()\[\]{}"']+/).filter(Boolean);
+
+  for (const chunk of chunks) {
+    if (!chunk || chunk.length < 2) continue;
+    tokens.add(chunk);
+
+    // Sub-split on dashes, dots, slashes, x (dimensions like 40x20), *
+    const parts = chunk.split(/[-_.\/x×*]+/);
+    for (const part of parts) {
+      if (part.length >= 2 && part !== chunk) tokens.add(part);
+    }
+
+    // Extract all numeric runs (part numbers, dimensions)
+    const nums = chunk.match(/\d+/g) || [];
+    for (const n of nums) {
+      if (n.length >= 2) tokens.add(n);
+    }
+  }
+
+  return Array.from(tokens);
+}
+
+function scoreRecord(queryTokens: string[], desc: string): number {
+  if (!desc) return 0;
+  const normalizedDesc = normalizeText(desc);
+  const descTokens = extractTokens(normalizedDesc);
+
+  const queryNumbers = queryTokens.filter(t => /^\d+$/.test(t));
+  const queryWords = queryTokens.filter(t => !/^\d+$/.test(t) && t.length >= 2);
+
+  let score = 0;
+  let exactMatches = 0;
+  const totalMeaningful = queryNumbers.length + queryWords.length;
+
+  // --- Numbers (part numbers, dimensions) ---
+  for (const num of queryNumbers) {
+    if (normalizedDesc.includes(num)) {
+      // Exact number found in description
+      score += num.length >= 5 ? 14 : num.length >= 4 ? 10 : 7;
+      exactMatches++;
+    } else {
+      // Partial: "6205" matches "62052", or desc has "620" when query is "6205"
+      for (const dt of descTokens) {
+        if (/^\d+$/.test(dt) && dt.length >= 2) {
+          if (dt.startsWith(num) || num.startsWith(dt)) score += 3;
+        }
+      }
+    }
+  }
+
+  // --- Words (category, brand, spec keywords) ---
+  for (const word of queryWords) {
+    if (normalizedDesc.includes(word)) {
+      score += word.length >= 7 ? 6 : word.length >= 5 ? 4 : 2;
+      exactMatches++;
+    } else {
+      // Partial word: "rodami" inside "rodamiento", or vice versa
+      for (const dt of descTokens) {
+        if (dt.length >= 4 && word.length >= 4) {
+          if (dt.includes(word) || word.includes(dt)) score += 1;
+        }
+      }
+    }
+  }
+
+  // Bonus: reward high match ratio (most query tokens matched)
+  if (totalMeaningful > 0 && exactMatches > 0) {
+    score += (exactMatches / totalMeaningful) * 10;
+  }
+
+  // Exact full description match
+  if (normalizedDesc === normalizeText(queryTokens.join(' '))) score += 25;
+
+  return score;
 }
 
 export function loadData(): PurchaseRecord[] {
@@ -64,7 +157,9 @@ export function loadData(): PurchaseRecord[] {
     });
 
     for (const row of rows) {
-      const sapCode = String(row['Código SAP/ Material'] || row['Codigo SAP/ Material'] || row['Material'] || '').trim();
+      const sapCode = String(
+        row['Código SAP/ Material'] || row['Codigo SAP/ Material'] || row['Material'] || ''
+      ).trim();
       const description = String(row['Texto breve'] || '').trim();
       const supplierRaw = String(row['Proveedor/Centro suministrador'] || '').trim();
       const { code: supplierCode, name: supplierName } = parseSupplier(supplierRaw);
@@ -72,7 +167,6 @@ export function loadData(): PurchaseRecord[] {
       const purchaseDoc = String(row['Documento compras'] || '').trim();
 
       if (!sapCode && !description) continue;
-
       records.push({ sapCode, description, supplierCode, supplierName, documentDate, purchaseDoc });
     }
   }
@@ -88,13 +182,7 @@ function buildSupplierIndex(records: PurchaseRecord[]) {
   for (const r of records) {
     if (!r.supplierCode) continue;
     if (!map.has(r.supplierCode)) {
-      map.set(r.supplierCode, {
-        code: r.supplierCode,
-        name: r.supplierName,
-        items: [],
-        sapCodes: [],
-        frequency: 0,
-      });
+      map.set(r.supplierCode, { code: r.supplierCode, name: r.supplierName, items: [], sapCodes: [], frequency: 0 });
     }
     const s = map.get(r.supplierCode)!;
     s.frequency++;
@@ -106,49 +194,35 @@ function buildSupplierIndex(records: PurchaseRecord[]) {
 }
 
 export function getSuppliers(): Map<string, SupplierSummary> {
-  if (!cachedSuppliers) {
-    const records = loadData();
-    buildSupplierIndex(records);
-  }
+  if (!cachedSuppliers) { loadData(); }
   return cachedSuppliers || new Map();
 }
 
-export function searchByDescription(query: string, limit = 5): PurchaseRecord[] {
+/**
+ * Full-text scored search. Returns up to `limit` unique (sapCode+supplier) records
+ * sorted by relevance score. Only includes records with score >= 2.
+ */
+export function searchByDescription(query: string, limit = 40): ScoredRecord[] {
   const records = loadData();
-  const normalizedQuery = normalizeText(query);
-  const queryWords = normalizedQuery.split(/\s+/).filter(w => w.length > 2);
+  const queryTokens = extractTokens(normalizeText(query)).filter(t => t.length >= 2);
+  if (queryTokens.length === 0) return [];
 
-  if (queryWords.length === 0) return [];
-
-  const scored: { record: PurchaseRecord; score: number }[] = [];
-
+  const scored: ScoredRecord[] = [];
   for (const record of records) {
-    if (!record.description) continue;
-    const normalizedDesc = normalizeText(record.description);
-    let score = 0;
-
-    for (const word of queryWords) {
-      if (normalizedDesc.includes(word)) score += 2;
-    }
-
-    const queryLen = queryWords.length;
-    const matchedWords = queryWords.filter(w => normalizedDesc.includes(w)).length;
-    score += (matchedWords / queryLen) * 3;
-
-    if (normalizedDesc === normalizedQuery) score += 10;
-
-    if (score > 0) scored.push({ record, score });
+    const score = scoreRecord(queryTokens, record.description);
+    if (score >= 2) scored.push({ record, score });
   }
 
   scored.sort((a, b) => b.score - a.score);
 
+  // Deduplicate by sapCode+supplier
   const seen = new Set<string>();
-  const results: PurchaseRecord[] = [];
-  for (const { record } of scored) {
-    const key = `${record.sapCode}-${record.supplierCode}`;
+  const results: ScoredRecord[] = [];
+  for (const sr of scored) {
+    const key = `${sr.record.sapCode}||${sr.record.supplierCode}`;
     if (!seen.has(key)) {
       seen.add(key);
-      results.push(record);
+      results.push(sr);
       if (results.length >= limit) break;
     }
   }
@@ -158,6 +232,6 @@ export function searchByDescription(query: string, limit = 5): PurchaseRecord[] 
 
 export function searchBySAPCode(code: string): PurchaseRecord[] {
   const records = loadData();
-  const normalizedCode = code.trim().toUpperCase();
-  return records.filter(r => r.sapCode.toUpperCase() === normalizedCode);
+  const norm = code.trim().toUpperCase();
+  return records.filter(r => r.sapCode.toUpperCase() === norm);
 }
