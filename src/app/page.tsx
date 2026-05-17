@@ -5,7 +5,7 @@ import { useDropzone } from 'react-dropzone';
 import {
   Upload, Camera, FileText, Search, CheckCircle, XCircle,
   AlertCircle, Building2, Package, ChevronDown, ChevronUp,
-  Type, Image as ImageIcon,
+  Type, Image as ImageIcon, Info,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -13,6 +13,7 @@ interface SapMatch {
   sapCode: string;
   description: string;
   confidence: 'high' | 'medium' | 'low';
+  confidenceLabel: string;
 }
 
 interface Supplier {
@@ -33,6 +34,7 @@ interface SearchResult {
   sapMatches: SapMatch[];
   suppliers: Supplier[];
   found: boolean;
+  searchNote?: string;
   message?: string;
 }
 
@@ -43,16 +45,10 @@ interface AnalysisResponse {
   error?: string;
 }
 
-const confidenceColors = {
+const confidenceBadge = {
   high: 'bg-green-100 text-green-800 border-green-200',
-  medium: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-  low: 'bg-gray-100 text-gray-700 border-gray-200',
-};
-
-const confidenceLabels = {
-  high: 'Alta',
-  medium: 'Media',
-  low: 'Baja',
+  medium: 'bg-blue-100 text-blue-800 border-blue-200',
+  low: 'bg-amber-100 text-amber-800 border-amber-200',
 };
 
 function ResultCard({ result, index }: { result: SearchResult; index: number }) {
@@ -64,26 +60,32 @@ function ResultCard({ result, index }: { result: SearchResult; index: number }) 
         className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 transition-colors"
         onClick={() => setExpanded(!expanded)}
       >
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 min-w-0">
           <div className={clsx(
-            'w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold',
+            'w-8 h-8 shrink-0 rounded-full flex items-center justify-center text-sm font-bold',
             result.found ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'
           )}>
             {index + 1}
           </div>
-          <div>
-            <p className="font-semibold text-gray-900 text-sm">{result.item.description}</p>
-            <div className="flex gap-2 mt-0.5">
+          <div className="min-w-0">
+            <p className="font-semibold text-gray-900 text-sm truncate">{result.item.description}</p>
+            <div className="flex gap-2 mt-0.5 flex-wrap">
               {result.item.quantity && (
                 <span className="text-xs text-gray-500">Cant: {result.item.quantity} {result.item.unit || ''}</span>
               )}
               {result.item.reference && (
                 <span className="text-xs text-gray-500">Ref: {result.item.reference}</span>
               )}
+              {result.sapMatches.length > 0 && (
+                <span className="text-xs font-medium text-blue-600">{result.sapMatches.length} cód. SAP</span>
+              )}
+              {result.suppliers.length > 0 && (
+                <span className="text-xs font-medium text-purple-600">{result.suppliers.length} proveedor{result.suppliers.length > 1 ? 'es' : ''}</span>
+              )}
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0 ml-2">
           {result.found ? (
             <CheckCircle className="w-5 h-5 text-green-500" />
           ) : (
@@ -94,33 +96,43 @@ function ResultCard({ result, index }: { result: SearchResult; index: number }) 
       </div>
 
       {expanded && (
-        <div className="px-4 pb-4 border-t border-gray-100">
+        <div className="px-4 pb-4 border-t border-gray-100 space-y-3">
           {result.item.notes && (
-            <p className="text-xs text-gray-500 mt-3 mb-3 italic">{result.item.notes}</p>
+            <p className="text-xs text-gray-500 mt-3 italic">{result.item.notes}</p>
           )}
 
+          {/* Approximate match warning */}
+          {result.searchNote && (
+            <div className="flex items-start gap-2 p-3 bg-amber-50 rounded-lg border border-amber-200 mt-3">
+              <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <p className="text-xs text-amber-700">{result.searchNote}</p>
+            </div>
+          )}
+
+          {/* Not found message */}
           {!result.found && result.message && (
             <div className="mt-3 p-3 bg-orange-50 rounded-lg border border-orange-200">
               <p className="text-sm text-orange-700">{result.message}</p>
             </div>
           )}
 
+          {/* SAP Codes */}
           {result.sapMatches.length > 0 && (
             <div className="mt-3">
               <div className="flex items-center gap-2 mb-2">
                 <Package className="w-4 h-4 text-blue-600" />
-                <h4 className="text-sm font-semibold text-gray-700">Códigos SAP encontrados</h4>
+                <h4 className="text-sm font-semibold text-gray-700">Códigos SAP</h4>
               </div>
               <div className="space-y-2">
                 {result.sapMatches.map((match, i) => (
-                  <div key={i} className="flex items-start gap-2 p-2 bg-blue-50 rounded-lg border border-blue-100">
+                  <div key={i} className="flex items-start gap-2 p-2.5 bg-blue-50 rounded-lg border border-blue-100">
                     <span className="font-mono font-bold text-blue-700 text-sm whitespace-nowrap">{match.sapCode}</span>
-                    <span className="text-xs text-gray-600 flex-1">{match.description}</span>
+                    <span className="text-xs text-gray-600 flex-1 leading-relaxed">{match.description}</span>
                     <span className={clsx(
-                      'text-xs px-2 py-0.5 rounded-full border font-medium whitespace-nowrap',
-                      confidenceColors[match.confidence]
+                      'text-xs px-2 py-0.5 rounded-full border font-medium whitespace-nowrap shrink-0',
+                      confidenceBadge[match.confidence]
                     )}>
-                      {confidenceLabels[match.confidence]}
+                      {match.confidenceLabel}
                     </span>
                   </div>
                 ))}
@@ -128,27 +140,28 @@ function ResultCard({ result, index }: { result: SearchResult; index: number }) 
             </div>
           )}
 
+          {/* Suppliers */}
           {result.suppliers.length > 0 && (
             <div className="mt-3">
               <div className="flex items-center gap-2 mb-2">
                 <Building2 className="w-4 h-4 text-purple-600" />
-                <h4 className="text-sm font-semibold text-gray-700">Proveedores recomendados</h4>
+                <h4 className="text-sm font-semibold text-gray-700">Proveedores que pueden tenerlo</h4>
               </div>
               <div className="space-y-2">
                 {result.suppliers.map((supplier, i) => (
-                  <div key={i} className="p-2 bg-purple-50 rounded-lg border border-purple-100">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-purple-900">{supplier.name}</span>
-                      <span className="text-xs text-purple-600 font-mono bg-purple-100 px-2 py-0.5 rounded">
-                        Cod: {supplier.code}
+                  <div key={i} className="p-2.5 bg-purple-50 rounded-lg border border-purple-100">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-sm font-semibold text-purple-900">{supplier.name}</span>
+                      <span className="text-xs text-purple-600 font-mono bg-purple-100 px-2 py-0.5 rounded shrink-0">
+                        {supplier.code}
                       </span>
                     </div>
-                    <p className="text-xs text-gray-500 mt-1">{supplier.frequency} pedidos históricos</p>
+                    <p className="text-xs text-gray-500 mt-0.5">{supplier.frequency} pedidos en histórico</p>
                     {supplier.relevantItems.length > 0 && (
                       <div className="mt-1.5 flex flex-wrap gap-1">
                         {supplier.relevantItems.slice(0, 3).map((item, j) => (
-                          <span key={j} className="text-xs bg-white text-gray-600 px-1.5 py-0.5 rounded border border-purple-100">
-                            {item.length > 40 ? item.substring(0, 40) + '...' : item}
+                          <span key={j} className="text-xs bg-white text-gray-500 px-1.5 py-0.5 rounded border border-purple-100">
+                            {item.length > 45 ? item.substring(0, 45) + '…' : item}
                           </span>
                         ))}
                       </div>
@@ -156,6 +169,13 @@ function ResultCard({ result, index }: { result: SearchResult; index: number }) 
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Extra note when found but no supplier */}
+          {result.found && result.message && (
+            <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+              <p className="text-xs text-gray-500">{result.message}</p>
             </div>
           )}
         </div>
@@ -233,12 +253,16 @@ export default function Home() {
     setError(null);
   };
 
+  const switchMode = (newMode: 'image' | 'text') => {
+    setMode(newMode);
+    handleReset();
+  };
+
   const foundCount = response?.results.filter(r => r.found).length ?? 0;
   const totalCount = response?.results.length ?? 0;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
-      {/* Header */}
       <header className="bg-white border-b border-gray-200 shadow-sm">
         <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -252,7 +276,7 @@ export default function Home() {
           </div>
           <div className="hidden sm:flex items-center gap-1 text-xs text-gray-400 bg-gray-50 px-3 py-1.5 rounded-full border">
             <span className="w-2 h-2 bg-green-400 rounded-full"></span>
-            Búsqueda en base de datos SAP
+            Búsqueda en histórico SAP
           </div>
         </div>
       </header>
@@ -264,8 +288,7 @@ export default function Home() {
               Identifica materiales al instante
             </h2>
             <p className="text-gray-600 max-w-2xl mx-auto">
-              Sube una foto, captura, PDF o escribe el texto con los materiales que necesitas.
-              Te devolvemos los <strong>códigos SAP</strong> y los <strong>proveedores</strong> recomendados.
+              Sube una foto, recorte, PDF o escribe el texto. Te devolvemos los <strong>códigos SAP</strong> y los <strong>proveedores</strong> más probables según tu histórico de compras.
             </p>
           </div>
         )}
@@ -273,28 +296,23 @@ export default function Home() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Input Panel */}
           <div className="space-y-4">
-
             {/* Mode tabs */}
             <div className="bg-white rounded-xl border border-gray-200 p-1 flex gap-1">
               <button
-                onClick={() => { setMode('image'); handleReset(); }}
+                onClick={() => switchMode('image')}
                 className={clsx(
                   'flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all',
-                  mode === 'image'
-                    ? 'bg-blue-600 text-white shadow-sm'
-                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                  mode === 'image' ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
                 )}
               >
                 <ImageIcon className="w-4 h-4" />
                 Imagen / Recorte
               </button>
               <button
-                onClick={() => { setMode('text'); handleReset(); }}
+                onClick={() => switchMode('text')}
                 className={clsx(
                   'flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all',
-                  mode === 'text'
-                    ? 'bg-blue-600 text-white shadow-sm'
-                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                  mode === 'text' ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
                 )}
               >
                 <Type className="w-4 h-4" />
@@ -302,70 +320,65 @@ export default function Home() {
               </button>
             </div>
 
-            {/* Image mode */}
-            {mode === 'image' && (
-              !file ? (
-                <div
-                  {...getRootProps()}
-                  className={clsx(
-                    'border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-all duration-200',
-                    isDragActive
-                      ? 'border-blue-400 bg-blue-50'
-                      : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50/50 bg-white'
-                  )}
-                >
-                  <input {...getInputProps()} />
-                  <div className="flex flex-col items-center gap-4">
-                    <div className="w-16 h-16 bg-blue-100 rounded-2xl flex items-center justify-center">
-                      <Upload className="w-8 h-8 text-blue-600" />
-                    </div>
-                    <div>
-                      <p className="text-lg font-semibold text-gray-700">
-                        {isDragActive ? 'Suelta aquí el archivo' : 'Arrastra o haz clic para subir'}
-                      </p>
-                      <p className="text-sm text-gray-500 mt-1">
-                        Fotos, capturas de pantalla o PDF · Máx. 20MB
-                      </p>
-                    </div>
-                    <div className="flex gap-3 text-xs text-gray-400">
-                      <span className="flex items-center gap-1"><Camera className="w-3 h-3" /> Foto</span>
-                      <span className="flex items-center gap-1"><FileText className="w-3 h-3" /> PDF</span>
-                      <span className="flex items-center gap-1"><Upload className="w-3 h-3" /> Captura</span>
-                    </div>
+            {/* Image drop zone */}
+            {mode === 'image' && !file && (
+              <div
+                {...getRootProps()}
+                className={clsx(
+                  'border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-all duration-200',
+                  isDragActive ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50/50 bg-white'
+                )}
+              >
+                <input {...getInputProps()} />
+                <div className="flex flex-col items-center gap-4">
+                  <div className="w-16 h-16 bg-blue-100 rounded-2xl flex items-center justify-center">
+                    <Upload className="w-8 h-8 text-blue-600" />
+                  </div>
+                  <div>
+                    <p className="text-lg font-semibold text-gray-700">
+                      {isDragActive ? 'Suelta aquí' : 'Arrastra o haz clic para subir'}
+                    </p>
+                    <p className="text-sm text-gray-500 mt-1">Foto, captura, recorte o PDF · Máx. 20MB</p>
+                  </div>
+                  <div className="flex gap-3 text-xs text-gray-400">
+                    <span className="flex items-center gap-1"><Camera className="w-3 h-3" /> Foto</span>
+                    <span className="flex items-center gap-1"><FileText className="w-3 h-3" /> PDF</span>
+                    <span className="flex items-center gap-1"><Upload className="w-3 h-3" /> Captura</span>
                   </div>
                 </div>
-              ) : (
-                <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
-                  {preview ? (
-                    <img src={preview} alt="Preview" className="w-full max-h-80 object-contain bg-gray-50" />
-                  ) : (
-                    <div className="h-40 bg-gray-50 flex items-center justify-center gap-3">
-                      <FileText className="w-12 h-12 text-gray-400" />
-                      <span className="text-gray-600">{file.name}</span>
-                    </div>
-                  )}
-                </div>
-              )
+              </div>
             )}
 
-            {/* Text mode */}
+            {/* Image preview */}
+            {mode === 'image' && file && (
+              <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
+                {preview ? (
+                  <img src={preview} alt="Preview" className="w-full max-h-80 object-contain bg-gray-50" />
+                ) : (
+                  <div className="h-40 bg-gray-50 flex items-center justify-center gap-3">
+                    <FileText className="w-12 h-12 text-gray-400" />
+                    <span className="text-gray-600 text-sm">{file.name}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Text input */}
             {mode === 'text' && (
               <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
-                <div className="p-3 bg-gray-50 border-b border-gray-200">
-                  <p className="text-xs text-gray-500">
-                    Pega aquí un email, presupuesto, lista de materiales o cualquier texto con los artículos que necesitas
-                  </p>
+                <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200">
+                  <p className="text-xs text-gray-500">Pega aquí un email, presupuesto, albarán o lista de materiales</p>
                 </div>
                 <textarea
                   value={textInput}
                   onChange={e => setTextInput(e.target.value)}
-                  placeholder="Ejemplo:&#10;- 2 ud. Rodamiento SKF 6205-2RS&#10;- Correa dentada 14M-2240 x 40mm&#10;- Filtro aire compresor Atlas Copco GA37"
+                  placeholder={`Ej:\n- 2 ud. Rodamiento SKF 6205-2RS\n- Correa dentada 14M-2240 x 40mm\n- Filtro aire compresor Atlas Copco GA37`}
                   className="w-full h-52 p-4 text-sm text-gray-800 resize-none focus:outline-none placeholder-gray-400"
                 />
               </div>
             )}
 
-            {/* Analyze / Clear buttons */}
+            {/* Buttons */}
             <div className="flex gap-3">
               <button
                 onClick={handleAnalyze}
@@ -385,30 +398,34 @@ export default function Home() {
                 )}
               </button>
               {(file || textInput) && (
-                <button
-                  onClick={handleReset}
-                  className="px-4 py-3 rounded-xl border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors"
-                >
+                <button onClick={handleReset} className="px-4 py-3 rounded-xl border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors">
                   Limpiar
                 </button>
               )}
             </div>
 
             {/* Info cards */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-white rounded-xl p-4 border border-gray-200">
-                <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center mb-2">
-                  <Package className="w-4 h-4 text-blue-600" />
+            <div className="grid grid-cols-3 gap-2">
+              <div className="bg-white rounded-xl p-3 border border-gray-200 text-center">
+                <div className="w-7 h-7 bg-green-100 rounded-lg flex items-center justify-center mx-auto mb-1.5">
+                  <Package className="w-3.5 h-3.5 text-green-600" />
                 </div>
-                <p className="text-sm font-semibold text-gray-800">Códigos SAP</p>
-                <p className="text-xs text-gray-500 mt-0.5">Solo códigos reales, sin genéricos</p>
+                <p className="text-xs font-semibold text-gray-700">Alta confianza</p>
+                <p className="text-xs text-gray-400">Coincidencia exacta</p>
               </div>
-              <div className="bg-white rounded-xl p-4 border border-gray-200">
-                <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center mb-2">
-                  <Building2 className="w-4 h-4 text-purple-600" />
+              <div className="bg-white rounded-xl p-3 border border-gray-200 text-center">
+                <div className="w-7 h-7 bg-blue-100 rounded-lg flex items-center justify-center mx-auto mb-1.5">
+                  <Package className="w-3.5 h-3.5 text-blue-600" />
                 </div>
-                <p className="text-sm font-semibold text-gray-800">Proveedores</p>
-                <p className="text-xs text-gray-500 mt-0.5">Basado en histórico de pedidos OCC</p>
+                <p className="text-xs font-semibold text-gray-700">Probable</p>
+                <p className="text-xs text-gray-400">Muy similar</p>
+              </div>
+              <div className="bg-white rounded-xl p-3 border border-gray-200 text-center">
+                <div className="w-7 h-7 bg-amber-100 rounded-lg flex items-center justify-center mx-auto mb-1.5">
+                  <Info className="w-3.5 h-3.5 text-amber-600" />
+                </div>
+                <p className="text-xs font-semibold text-gray-700">Posible</p>
+                <p className="text-xs text-gray-400">Revisar antes de pedir</p>
               </div>
             </div>
           </div>
@@ -421,7 +438,7 @@ export default function Home() {
                 <p className="font-semibold text-gray-700">
                   {mode === 'text' ? 'Procesando texto...' : 'Analizando imagen...'}
                 </p>
-                <p className="text-sm text-gray-500 mt-1">GPT-4 está identificando los artículos</p>
+                <p className="text-sm text-gray-500 mt-1">Identificando artículos y buscando en histórico</p>
               </div>
             )}
 
@@ -443,37 +460,26 @@ export default function Home() {
                       {totalCount} artículo{totalCount !== 1 ? 's' : ''} identificado{totalCount !== 1 ? 's' : ''}
                     </p>
                     <p className="text-xs text-gray-500">
-                      {foundCount} encontrado{foundCount !== 1 ? 's' : ''} en base de datos ·{' '}
-                      {totalCount - foundCount} sin coincidencia
+                      {foundCount} con resultado · {totalCount - foundCount} sin coincidencia
                     </p>
                   </div>
                   <div className={clsx(
                     'text-2xl font-bold',
-                    foundCount === totalCount ? 'text-green-600' :
-                    foundCount > 0 ? 'text-yellow-600' : 'text-red-500'
+                    foundCount === totalCount ? 'text-green-600' : foundCount > 0 ? 'text-blue-600' : 'text-orange-500'
                   )}>
                     {totalCount > 0 ? Math.round((foundCount / totalCount) * 100) : 0}%
                   </div>
                 </div>
-
                 {response.results.map((result, i) => (
                   <ResultCard key={i} result={result} index={i} />
                 ))}
-
-                {response.message && (
-                  <div className="bg-blue-50 rounded-xl border border-blue-200 p-4">
-                    <p className="text-sm text-blue-700">{response.message}</p>
-                  </div>
-                )}
               </>
             )}
 
             {!response && !loading && !error && (
               <div className="bg-white rounded-2xl border border-dashed border-gray-200 p-8 text-center">
                 <Search className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-                <p className="text-gray-400 text-sm">
-                  Los resultados aparecerán aquí tras el análisis
-                </p>
+                <p className="text-gray-400 text-sm">Los resultados aparecerán aquí</p>
               </div>
             )}
           </div>
