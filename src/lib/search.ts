@@ -8,6 +8,7 @@ import {
   type PurchaseRecord,
   type ScoredRecord,
 } from './data-loader';
+import { scoreSuppliersByKnowledge, getSupplierKnowledge } from './supplier-knowledge';
 
 export interface SearchResult {
   item: {
@@ -151,19 +152,23 @@ export function findMatches(item: {
     }
   }
 
-  // 3. Supplier discovery: keyword expansion + materialType
-  // Build keyword hit map: suppliers that supply this CATEGORY of material
+  // 3. Supplier discovery: three layers merged
+  // Layer A: keyword expansion across Excel historical data
   const keywordMap = buildSupplierKeywordMap(query, item.materialType);
 
-  // Also add hits from the full scored search (direct relevance)
+  // Layer B: direct hits from scored search results
   const directHits = new Map<string, number>();
   for (const r of fullSearchRecords) {
     if (!r.supplierCode) continue;
-    directHits.set(r.supplierCode, (directHits.get(r.supplierCode) || 0) + 3); // direct match worth more
+    directHits.set(r.supplierCode, (directHits.get(r.supplierCode) || 0) + 3);
   }
 
-  // Merge: combined score = keyword hits * 5 + direct hits
-  const allCodes = new Set([...keywordMap.keys(), ...directHits.keys()]);
+  // Layer C: knowledge base (brands, keywords, categories hardcoded per supplier)
+  const knowledgeQuery = [query, item.materialType].filter(Boolean).join(' ');
+  const knowledgeScores = scoreSuppliersByKnowledge(knowledgeQuery);
+
+  // Merge all three sources
+  const allCodes = new Set([...keywordMap.keys(), ...directHits.keys(), ...knowledgeScores.keys()]);
   const allSuppliers = getSuppliers();
 
   const ranked: { code: string; score: number; keywords: string[] }[] = [];
@@ -171,30 +176,48 @@ export function findMatches(item: {
     const kw = keywordMap.get(code);
     const direct = directHits.get(code) || 0;
     const kwScore = kw ? kw.hits * 5 : 0;
-    ranked.push({ code, score: kwScore + direct, keywords: kw?.keywords || [] });
+    const knowledgeScore = (knowledgeScores.get(code) || 0) * 2;
+    ranked.push({ code, score: kwScore + direct + knowledgeScore, keywords: kw?.keywords || [] });
   }
 
   ranked.sort((a, b) => b.score - a.score);
 
+  const qLower = knowledgeQuery.toLowerCase();
   const seenSuppliers = new Set<string>();
   for (const { code, keywords } of ranked) {
     if (seenSuppliers.has(code)) continue;
     const supplier = allSuppliers.get(code);
-    if (!supplier) continue;
+    const knowledge = getSupplierKnowledge(code);
 
-    // Build a human-readable reason
+    // Need at least a name — from Excel or from knowledge base
+    const name = supplier?.name ?? knowledge?.name;
+    if (!name) continue;
+
+    // Build a human-readable reason (knowledge > keywords > fallback)
     let matchReason = '';
-    if (keywords.length > 0) {
-      matchReason = `Suministra: ${keywords.slice(0, 3).join(', ')}`;
-    } else {
-      matchReason = 'Artículo similar en histórico';
+    if (knowledge) {
+      const matchedBrands = knowledge.brands.filter(b => qLower.includes(b.toLowerCase()));
+      const matchedKws = knowledge.keywords.filter(k => qLower.includes(k.toLowerCase()));
+      if (matchedBrands.length > 0) {
+        matchReason = `Distribuidor: ${matchedBrands.slice(0, 3).join(', ')}`;
+      } else if (matchedKws.length > 0) {
+        matchReason = `Especialidad: ${matchedKws.slice(0, 3).join(', ')}`;
+      } else if (knowledge.speciality) {
+        matchReason = knowledge.speciality.length > 80
+          ? knowledge.speciality.slice(0, 77) + '...'
+          : knowledge.speciality;
+      }
     }
+    if (!matchReason && keywords.length > 0) {
+      matchReason = `Suministra: ${keywords.slice(0, 3).join(', ')}`;
+    }
+    if (!matchReason) matchReason = 'Artículo similar en histórico';
 
     result.suppliers.push({
-      code: supplier.code,
-      name: supplier.name,
-      frequency: supplier.frequency,
-      relevantItems: supplier.items.slice(0, 4),
+      code: supplier?.code ?? code,
+      name,
+      frequency: supplier?.frequency ?? 0,
+      relevantItems: supplier?.items.slice(0, 4) ?? [],
       matchReason,
     });
     seenSuppliers.add(code);
