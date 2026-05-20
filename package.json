@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "convert-data": "node scripts/convert-data.mjs"
+    "build-data": "python3 scripts/build-knowledge.py",
+    "sync-contactos": "node scripts/sync-contactos.mjs"
   },
   "dependencies": {
     "next": "14.2.5",
