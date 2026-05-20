@@ -1,0 +1,227 @@
+{
+  "name": "Compras - Búsqueda Standalone (sin Vercel)",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": ["message"],
+        "additionalFields": {}
+      },
+      "id": "telegram-trigger",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [100, 200],
+      "webhookId": "compras-telegram-standalone",
+      "credentials": {
+        "telegramApi": {
+          "id": "TELEGRAM_CRED_ID",
+          "name": "Telegram Compras"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "cond-photo",
+                    "leftValue": "={{ $json.message.photo }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "object",
+                      "operation": "exists",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "photo"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "cond-text",
+                    "leftValue": "={{ $json.message.text }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "string",
+                      "operation": "exists",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "text"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "none"
+        }
+      },
+      "id": "switch-node",
+      "name": "Switch: foto o texto",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [300, 200]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://raw.githubusercontent.com/juanky2332-oss/COMPRAS/claude/add-supplier-database-L7gvN/public/data/historico_compact.json",
+        "options": {}
+      },
+      "id": "load-historico",
+      "name": "Cargar historico_compact.json",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 100],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://raw.githubusercontent.com/juanky2332-oss/COMPRAS/claude/add-supplier-database-L7gvN/public/data/proveedores_habituales_enriched.json",
+        "options": {}
+      },
+      "id": "load-proveedores",
+      "name": "Cargar proveedores_enriched.json",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 300],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://raw.githubusercontent.com/juanky2332-oss/COMPRAS/claude/add-supplier-database-L7gvN/public/data/catalogo_sap_compact.json",
+        "options": {}
+      },
+      "id": "load-catalogo",
+      "name": "Cargar catalogo_sap_compact.json",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 500],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://raw.githubusercontent.com/juanky2332-oss/COMPRAS/claude/add-supplier-database-L7gvN/public/data/sap_to_proveedores.json",
+        "options": {}
+      },
+      "id": "load-sap-to-prov",
+      "name": "Cargar sap_to_proveedores.json",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 700],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "id": "merge-data",
+      "name": "Merge Datos",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Búsqueda en historico + SAP + proveedores\nconst text = $input.first().json.message?.text || '';\nconst historico = $input.first().json.body[0] || [];\nconst proveedores = $input.first().json.body[1] || [];\nconst catalogo = $input.first().json.body[2] || [];\nconst sapMap = $input.first().json.body[3] || {};\n\nif (!text) {\n  return { ok: false, error: 'Sin texto' };\n}\n\n// Normalizar\nconst norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');\nconst textNorm = norm(text);\n\n// Buscar en histórico\nconst matches = historico.filter(r => norm(r.d).includes(textNorm) || textNorm.includes(norm(r.d)));\nconst supplierCounts = {};\nmatches.forEach(m => {\n  if (!supplierCounts[m.n]) supplierCounts[m.n] = { count: 0, codes: new Set() };\n  supplierCounts[m.n].count++;\n  supplierCounts[m.n].codes.add(m.s);\n});\n\n// Top proveedores\nconst topSuppliers = Object.entries(supplierCounts)\n  .sort((a, b) => b[1].count - a[1].count)\n  .slice(0, 5)\n  .map(([name, data], idx) => {\n    const prov = proveedores.find(p => norm(p.nombre_oficial) === norm(name) || norm(p.nombre_corto) === norm(name));\n    return {\n      priority: idx + 1,\n      nombre: name,\n      nombre_corto: prov?.nombre_corto || name,\n      email: prov?.email || '',\n      telefono: prov?.telefono || '',\n      compras_historicas: data.count,\n      marcas_relevantes: prov?.marcas || []\n    };\n  });\n\n// SAP matches\nconst sapMatches = catalogo.filter(c => norm(c.d).includes(textNorm)).slice(0, 3);\n\nreturn {\n  ok: true,\n  description: text,\n  sap_matches: sapMatches.map(s => ({ codigo_sap: s.s, descripcion: s.d })),\n  suppliers: topSuppliers\n};"
+      },
+      "id": "buscar-code",
+      "name": "Buscar (Code)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Formatear respuesta para Telegram\nconst data = $input.first().json;\nif (!data.ok) return { summary_text: '❌ ' + (data.error || 'Error sin especificar') };\n\nconst lines = [];\nlines.push(`*${data.description}*`);\n\nif (data.sap_matches?.length) {\n  const first = data.sap_matches[0];\n  lines.push(`   SAP: \\`${first.codigo_sap}\\` — ${first.descripcion}`);\n}\n\nif (data.suppliers?.length) {\n  lines.push('   Proveedores:');\n  data.suppliers.forEach(s => {\n    lines.push(`     ${s.priority}. *${s.nombre_corto}* — ${s.compras_historicas} compras`);\n    if (s.telefono) lines.push(`        📞 ${s.telefono}`);\n    if (s.email) lines.push(`        ✉️ ${s.email}`);\n  });\n}\n\nreturn { summary_text: lines.join('\\n') };"
+      },
+      "id": "format-response",
+      "name": "Formatear Respuesta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json.summary_text || 'Sin respuesta' }}",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "reply_to_message_id": "={{ $('Telegram Trigger').item.json.message.message_id }}"
+        }
+      },
+      "id": "telegram-reply",
+      "name": "Telegram: Responder",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1300, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "TELEGRAM_CRED_ID",
+          "name": "Telegram Compras"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [[{ "node": "Switch: foto o texto", "type": "main", "index": 0 }]]
+    },
+    "Switch: foto o texto": {
+      "main": [
+        [{ "node": "Cargar historico_compact.json", "type": "main", "index": 0 }],
+        [{ "node": "Cargar historico_compact.json", "type": "main", "index": 0 }]
+      ]
+    },
+    "Cargar historico_compact.json": {
+      "main": [[{ "node": "Cargar proveedores_enriched.json", "type": "main", "index": 0 }]]
+    },
+    "Cargar proveedores_enriched.json": {
+      "main": [[{ "node": "Cargar catalogo_sap_compact.json", "type": "main", "index": 0 }]]
+    },
+    "Cargar catalogo_sap_compact.json": {
+      "main": [[{ "node": "Cargar sap_to_proveedores.json", "type": "main", "index": 0 }]]
+    },
+    "Cargar sap_to_proveedores.json": {
+      "main": [[{ "node": "Merge Datos", "type": "main", "index": 0 }]]
+    },
+    "Merge Datos": {
+      "main": [[{ "node": "Buscar (Code)", "type": "main", "index": 0 }]]
+    },
+    "Buscar (Code)": {
+      "main": [[{ "node": "Formatear Respuesta", "type": "main", "index": 0 }]]
+    },
+    "Formatear Respuesta": {
+      "main": [[{ "node": "Telegram: Responder", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": false,
+  "versionId": "1.0.0"
+}
