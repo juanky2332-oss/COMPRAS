@@ -35,4 +35,7 @@ yarn-error.log*
 next-env.d.ts
 
 # data files (user manages these)
-/public/data/*.xlsx
+# Los .xlsx de public/data SÍ se commitean para que la app funcione en Vercel.
+# Si necesitas mantenerlos privados, mueve la lógica a JSONs pre-procesados
+# (data/*.json ya están listos via scripts/build-knowledge.py).
+

@@ -1,0 +1,180 @@
+{
+  "name": "Compras",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": ["message"],
+        "additionalFields": {}
+      },
+      "id": "1a000000-0000-0000-0000-000000000001",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 320],
+      "webhookId": "compras-telegram",
+      "credentials": {
+        "telegramApi": { "id": "TELEGRAM_CRED_ID", "name": "Telegram Compras" }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+                "conditions": [
+                  {
+                    "id": "cond-photo",
+                    "leftValue": "={{ $json.message.photo }}",
+                    "rightValue": "",
+                    "operator": { "type": "object", "operation": "exists", "singleValue": true }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "photo"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+                "conditions": [
+                  {
+                    "id": "cond-text",
+                    "leftValue": "={{ $json.message.text }}",
+                    "rightValue": "",
+                    "operator": { "type": "string", "operation": "exists", "singleValue": true }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "text"
+            }
+          ]
+        },
+        "options": { "fallbackOutput": "none" }
+      },
+      "id": "1a000000-0000-0000-0000-000000000002",
+      "name": "Switch: foto o texto",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [480, 320]
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "fileId": "={{ $json.message.photo[$json.message.photo.length - 1].file_id }}"
+      },
+      "id": "1a000000-0000-0000-0000-000000000003",
+      "name": "Telegram: descargar foto",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [720, 200],
+      "credentials": {
+        "telegramApi": { "id": "TELEGRAM_CRED_ID", "name": "Telegram Compras" }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.COMPRAS_API_URL }}/api/n8n/query",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"image_base64\": \"{{ $binary.data.data }}\",\n  \"image_mime\": \"{{ $binary.data.mimeType }}\",\n  \"text\": \"{{ $('Telegram Trigger').item.json.message.caption || '' }}\",\n  \"max_suppliers\": 5,\n  \"max_sap\": 3\n}",
+        "options": { "timeout": 90000 }
+      },
+      "id": "1a000000-0000-0000-0000-000000000004",
+      "name": "POST /api/n8n/query (foto)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.COMPRAS_API_URL }}/api/n8n/query",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"{{ $json.message.text }}\",\n  \"max_suppliers\": 5,\n  \"max_sap\": 3\n}",
+        "options": { "timeout": 90000 }
+      },
+      "id": "1a000000-0000-0000-0000-000000000005",
+      "name": "POST /api/n8n/query (texto)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, 440]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "id": "1a000000-0000-0000-0000-000000000006",
+      "name": "Merge respuestas",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [1200, 320]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json.summary_text || $json.error || 'Sin respuesta de la API' }}",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "reply_to_message_id": "={{ $('Telegram Trigger').item.json.message.message_id }}"
+        }
+      },
+      "id": "1a000000-0000-0000-0000-000000000007",
+      "name": "Telegram: responder",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1440, 320],
+      "credentials": {
+        "telegramApi": { "id": "TELEGRAM_CRED_ID", "name": "Telegram Compras" }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [{ "node": "Switch: foto o texto", "type": "main", "index": 0 }]
+      ]
+    },
+    "Switch: foto o texto": {
+      "main": [
+        [{ "node": "Telegram: descargar foto", "type": "main", "index": 0 }],
+        [{ "node": "POST /api/n8n/query (texto)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Telegram: descargar foto": {
+      "main": [
+        [{ "node": "POST /api/n8n/query (foto)", "type": "main", "index": 0 }]
+      ]
+    },
+    "POST /api/n8n/query (foto)": {
+      "main": [
+        [{ "node": "Merge respuestas", "type": "main", "index": 0 }]
+      ]
+    },
+    "POST /api/n8n/query (texto)": {
+      "main": [
+        [{ "node": "Merge respuestas", "type": "main", "index": 1 }]
+      ]
+    },
+    "Merge respuestas": {
+      "main": [
+        [{ "node": "Telegram: responder", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": false,
+  "versionId": "1.0.0",
+  "tags": [
+    { "name": "compras" },
+    { "name": "telegram" }
+  ]
+}
