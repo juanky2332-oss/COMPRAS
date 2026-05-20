@@ -35,8 +35,10 @@ yarn-error.log*
 next-env.d.ts
 
 # data files
-# Los .xlsx originales solo viven localmente en data/raw/ — la app usa los
-# JSONs procesados en public/data/*.json generados por scripts/build-knowledge.py
+# Los .xlsx originales y JSONs intermedios viven solo localmente.
+# La app sirve los JSONs ya procesados desde public/data/.
+# Regeneras todo con: python3 scripts/build-knowledge.py
 /data/raw/
+/data/*.json
 
 
