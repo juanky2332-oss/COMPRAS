@@ -307,10 +307,28 @@ stats = {
 # ---------------------------------------------------------------------------
 for fn in ["proveedores_habituales_enriched.json", "sap_to_proveedores.json", "stats.json"]:
     (PUB / fn).write_text((OUT / fn).read_text(encoding="utf-8"), encoding="utf-8")
-for fn in ["codigos_sap.xlsx", "historico_compras.xlsx"]:
-    src = RAW / fn
-    if src.exists():
-        (PUB / fn).write_bytes(src.read_bytes())
+
+# Compact JSONs que reemplazan los .xlsx en runtime
+historico_compact = []
+for _, row in df_h.iterrows():
+    sup_code = row["prov_id"] or ""
+    sup_name = row["prov_nombre"] or ""
+    historico_compact.append({
+        "s": row["codigo_sap"],
+        "d": row["descripcion"],
+        "c": sup_code,
+        "n": sup_name,
+        "f": row["fecha"].strftime("%Y-%m-%d") if pd.notna(row["fecha"]) else "",
+        "p": "",
+    })
+(PUB / "historico_compact.json").write_text(
+    json.dumps(historico_compact, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+print(f"public/data/historico_compact.json: {len(historico_compact)} registros")
+
+catalogo_compact = [{"s": r["material"], "d": r["descripcion"]} for r in codigos_sap]
+(PUB / "catalogo_sap_compact.json").write_text(
+    json.dumps(catalogo_compact, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+print(f"public/data/catalogo_sap_compact.json: {len(catalogo_compact)} entradas")
 
 print()
 print(json.dumps(stats, indent=2, ensure_ascii=False))
