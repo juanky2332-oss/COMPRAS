@@ -1,4 +1,3 @@
-import * as XLSX from 'xlsx';
 import path from 'path';
 import fs from 'fs';
 
@@ -119,47 +118,36 @@ function scoreRecord(queryTokens: string[], desc: string): number {
   return score;
 }
 
+type CompactRecord = { s: string; d: string; c: string; n: string; f: string; p: string };
+
 export function loadData(): PurchaseRecord[] {
   if (cachedRecords) return cachedRecords;
 
-  const dataDir = path.join(process.cwd(), 'public', 'data');
-  const files = fs.existsSync(dataDir)
-    ? fs.readdirSync(dataDir).filter(f => f.endsWith('.xlsx') || f.endsWith('.xls'))
-    : [];
-
-  if (files.length === 0) {
+  const compactFile = path.join(process.cwd(), 'public', 'data', 'historico_compact.json');
+  if (!fs.existsSync(compactFile)) {
     cachedRecords = [];
     return [];
   }
 
-  const records: PurchaseRecord[] = [];
-
-  for (const file of files) {
-    const wb = XLSX.readFile(path.join(dataDir, file));
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, {
-      defval: '',
-      raw: false,
-    });
-
-    for (const row of rows) {
-      const sapCode = String(
-        row['Código SAP/ Material'] || row['Codigo SAP/ Material'] || row['Material'] || ''
-      ).trim();
-      const description = String(row['Texto breve'] || '').trim();
-      const supplierRaw = String(row['Proveedor/Centro suministrador'] || '').trim();
-      const { code: supplierCode, name: supplierName } = parseSupplier(supplierRaw);
-      const documentDate = String(row['Fecha documento'] || '').trim();
-      const purchaseDoc = String(row['Documento compras'] || '').trim();
-
-      if (!sapCode && !description) continue;
-      records.push({ sapCode, description, supplierCode, supplierName, documentDate, purchaseDoc });
-    }
-  }
+  const compact: CompactRecord[] = JSON.parse(fs.readFileSync(compactFile, 'utf-8'));
+  const records: PurchaseRecord[] = compact.map(r => ({
+    sapCode: r.s,
+    description: r.d,
+    supplierCode: r.c,
+    supplierName: r.n,
+    documentDate: r.f,
+    purchaseDoc: r.p,
+  }));
 
   cachedRecords = records;
   buildSupplierIndex(records);
   return records;
+}
+
+// Mantenido para futura compatibilidad si se quisiera volver a leer .xlsx en runtime.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function _parseSupplierLegacy(raw: string) {
+  return parseSupplier(raw);
 }
 
 function buildSupplierIndex(records: PurchaseRecord[]) {
